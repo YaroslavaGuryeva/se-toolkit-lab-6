@@ -16,9 +16,9 @@ def api_base_url() -> str:
 
 @pytest.fixture(scope="session")
 def api_key() -> str:
-    key = os.environ.get("API_KEY", "")
+    key = os.environ.get("LMS_API_KEY", "")
     if not key:
-        pytest.skip("API_KEY environment variable is not set")
+        pytest.skip("LMS_API_KEY environment variable is not set")
     return key
 
 
