@@ -32,35 +32,69 @@ User question (CLI arg)
 
 ### `agent.py`
 
-The main CLI entry point with the following responsibilities:
+The main CLI entry point with:
 
-1. **Argument parsing** — reads the question from `sys.argv[1]`
-2. **Environment loading** — reads `.env.agent.secret` for LLM credentials
-3. **LLM invocation** — makes an async HTTP request to the LLM API
-4. **Response formatting** — wraps the LLM's answer in a structured JSON format
+1. **Agentic Loop** — iterates up to 10 times, calling LLM and executing tools
+2. **Tool Execution** — safely executes `list_files` and `read_file` tools
+3. **Conversation Management** — maintains message history with tool responses
+4. **Output Formatting** — produces JSON with answer, source, and tool call history
 
-### Environment Configuration (`.env.agent.secret`)
+## Tools
 
-| Variable | Description |
+### 1. `list_files`
+
+Lists files and directories at a given path.
+
+| Property | Description |
 |----------|-------------|
-| `LLM_API_KEY` | API key for authentication |
-| `LLM_API_BASE` | Base URL of the LLM API (e.g., `http://vm-ip:port/v1`) |
-| `LLM_MODEL` | Model name (e.g., `qwen3-coder-plus`) |
+| **Description** | List files and directories at a given path |
+| **Parameters** | `path` (string): Relative directory path from project root |
+| **Returns** | Newline-separated listing of entries, or error message |
+| **Security** | Blocks paths containing `..`; ensures path is within project root |
+
+### 2. `read_file`
+
+Reads a file from the project repository.
+
+| Property | Description |
+|----------|-------------|
+| **Description** | Read a file from the project repository |
+| **Parameters** | `path` (string): Relative file path from project root |
+| **Returns** | File contents as string, or error message |
+| **Security** | Blocks paths containing `..`; ensures path is within project root; only reads files |
+
+## System Prompt Strategy
+
+The system prompt instructs the LLM to:
+
+1. **Explore first** — use `list_files` to discover relevant wiki files
+2. **Read specific files** — use `read_file` to find answers
+3. **Include source** — format answers with source references like `wiki/filename.md#section`
+4. **Be concise** — provide direct answers without extra explanation
 
 ## Output Format
 
 The agent outputs a single JSON line to stdout:
 
-```json
-{"answer": "Representational State Transfer.", "tool_calls": []}
 ```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `answer` | string | The LLM's answer to the question |
-| `tool_calls` | array | Empty for Task 1; will contain tool invocations in Task 2+ |
-
-All debug and progress output goes to **stderr** to keep stdout clean for JSON parsing.
+json
+{
+  "answer": "Edit the conflicting file, choose which changes to keep, then stage and commit.",
+  "source": "wiki/git-workflow.md#resolving-merge-conflicts",
+  "tool_calls": [
+    {
+      "tool": "list_files",
+      "args": {"path": "wiki"},
+      "result": "git-workflow.md\nadvanced-topics.md\n"
+    },
+    {
+      "tool": "read_file",
+      "args": {"path": "wiki/git-workflow.md"},
+      "result": "# Git Workflow\n\n## Resolving Merge Conflicts\nWhen you encounter a merge conflict..."
+    }
+  ]
+}
+```
 
 ## Usage
 
@@ -71,25 +105,6 @@ uv run agent.py "What does REST stand for?"
 # Example output
 {"answer": "REST stands for Representational State Transfer.", "tool_calls": []}
 ```
-
-## Setup
-
-1. Copy the environment template:
-   ```bash
-   cp .env.agent.example .env.agent.secret
-   ```
-
-2. Edit `.env.agent.secret` and fill in your credentials:
-   ```
-   LLM_API_KEY=your-api-key-here
-   LLM_API_BASE=http://your-vm-ip:port/v1
-   LLM_MODEL=qwen3-coder-plus
-   ```
-
-3. Run the agent:
-   ```bash
-   uv run agent.py "Your question here"
-   ```
 
 ## Error Handling
 
