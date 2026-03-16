@@ -125,6 +125,7 @@ def query_api(method: str, path: str, body: str | None = None, auth: bool = True
     url = f"{base_url}{path}"
 
     # Prepare headers
+
     headers = {}
     if auth and settings.lms_api_key:
         # Backend expects "Authorization: Bearer <API_KEY>" format
@@ -231,36 +232,29 @@ Tool Selection Guide:
 - VM/SSH questions → use `read_file` on wiki/vm.md (for VM connection steps) or wiki/ssh.md (for SSH key setup)
 - GitHub questions (branch protection, PRs, forks) → use `read_file` on wiki/github.md
 - Source code questions (framework, architecture, ports) → use `read_file` on backend/app/main.py (for framework imports), backend/app/routers/*.py, or docker-compose.yml
-- ETL pipeline questions (idempotency, data loading) → use `read_file` on backend/app/etl.py - look for the load function and how it handles duplicates using external_id checks
 - Docker/architecture questions → use `read_file` on Dockerfile (root directory), docker-compose.yml, caddy/Caddyfile
 - Live data questions (item count, scores, statistics) → use `query_api` with auth=true (default)
 - API behavior questions (status codes, errors) → use `query_api`; set auth=false to test unauthenticated access
-- Bug diagnosis → use `query_api` to reproduce the error (try ONE lab value), then ALWAYS use `read_file` to examine the source code. For analytics endpoint bugs, read `backend/app/routers/analytics.py` to find the buggy line
-- For `/analytics/completion-rate` division by zero: AFTER the API call, you MUST read `backend/app/routers/analytics.py` to find the exact line with the division
-- For `/analytics/top-learners` crashes: AFTER ONE API call, you MUST read `backend/app/routers/analytics.py` and look for the `sorted()` call that sorts by `avg_score` - if `avg_score` can be `None`, this causes a `TypeError`
-- Don't waste tool calls trying multiple lab values - one API call is enough to see the pattern, then read the source code
+- Bug diagnosis → use `query_api` to reproduce the error, then `read_file` to examine the source code
 
 Strategy:
 1. First understand what type of question is being asked
 2. If you don't know the exact file name, use `list_files` first to discover available files
 3. Then use `read_file` on the most relevant file(s)
 4. For API questions, make the appropriate API call
-5. For bug diagnosis, ALWAYS read the source code after reproducing the error - find the exact line causing the bug
-6. Provide a concise final answer with actual information from the files/API - state the facts you found, not what you're going to do
+5. Provide a concise final answer with actual information from the files/API - state the facts you found, not what you're going to do
 
 Important:
 - ALWAYS provide all required arguments when calling tools
-- After using tools, you MUST provide a final answer with the actual content you found - do NOT just say what file you read or what you're going to do
-- Provide a FINAL answer that directly addresses the question - state the facts you found
+- After using tools, you MUST provide a final answer with the actual content you found - do NOT just say what file you read
 - If you get an API response with status_code 200, you have the data - provide the answer immediately
 - If you get a redirect (307), try the same path with a trailing slash
-- If the answer came from a file, include the source on a separate line: "Source: path/to/file.md#section" or "Source: path/to/file.py#L123"
+- If the answer came from a file, include the source on a separate line: "Source: path/to/file.md#section"
 - For API responses, summarize the key information
 - Be concise - answer in 2-3 sentences maximum unless more detail is needed
 - Maximum 10 tool calls total
-- After reading source code for bug diagnosis, provide the exact bug location and explanation as your final answer
 
-If you don't find the answer after 3-4 tool calls, provide your best answer based on what you found."""
+If you don't find the answer, say so honestly."""
 
 
 def execute_tool(tool_name: str, args: dict[str, Any], settings: AgentSettings) -> str:
@@ -400,12 +394,10 @@ def extract_source(answer: str) -> str:
     # Look for patterns like "wiki/file.md" or "Source: wiki/file.md"
     import re
 
-    # Try to find wiki file references and source code references
+    # Try to find wiki file references
     patterns = [
         r"Source:\s*([a-zA-Z0-9_/.-]+(?:#[a-zA-Z0-9_-]+)?)",
-        r"Source:\s*`?([a-zA-Z0-9_/.]+\.py(?:#L\d+)?)`?",
         r"([a-zA-Z0-9_/.-]+\.md(?:#[a-zA-Z0-9_-]+)?)",
-        r"([a-zA-Z0-9_/.]+\.py(?:#L\d+)?)",
     ]
 
     for pattern in patterns:
