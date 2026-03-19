@@ -39,6 +39,7 @@ async def fetch_logs(since: datetime | None = None) -> list[dict]:
     """Fetch check results from the autochecker API with pagination."""
     all_logs: list[dict] = []
 
+    timeout = httpx.Timeout(30.0)  
     async with httpx.AsyncClient() as client:
         cursor = since
         while True:

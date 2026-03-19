@@ -235,12 +235,15 @@ Tool Selection Guide:
 - Docker/architecture questions → use `read_file` on Dockerfile (root directory), docker-compose.yml, caddy/Caddyfile
 - Live data questions (item count, scores, statistics) → use `query_api` with auth=true (default)
 - API behavior questions (status codes, errors) → use `query_api`; set auth=false to test unauthenticated access
-- Bug diagnosis → use `query_api` to reproduce the error, then ALWAYS use `read_file` to examine the source code
-
-CRITICAL RULE FOR BUG DIAGNOSIS:
-When you get an API error (status_code 4xx or 5xx), you MUST call `read_file` to examine the source code file mentioned in the traceback.
-Even if the traceback shows the file and line number, you still need to read the file to see the actual code.
-Example: If traceback shows "File backend/app/routers/analytics.py, line 212", call read_file with path "backend/app/routers/analytics.py"
+- Learner count questions → use `query_api` with GET /learners/ and count the returned list
+- Bug diagnosis → use `query_api` to reproduce the error, then `read_file` to examine the source code
+- Bug detection in analytics code → read `backend/app/routers/analytics.py` and look for:
+  - Division operations that could cause ZeroDivisionError (e.g., `a / b` without checking `b != 0`)
+  - Sorting with None values (e.g., `sorted(rows, key=lambda r: r.avg_score)` where `avg_score` could be None)
+  - None-unsafe operations (attribute access on potentially None values)
+- Error handling comparison → read both `backend/app/etl.py` and `backend/app/routers/*.py` and compare:
+  - ETL: Look for try/except blocks, error logging, rollback strategies, idempotency checks
+  - API routers: Look for HTTPException raises, Depends for sessions, validation errors
 
 Strategy:
 1. First understand what type of question is being asked
@@ -256,11 +259,55 @@ Important:
 - If you get an API response with status_code 200, you have the data - provide the answer immediately
 - If you get an API error (4xx or 5xx), you MUST call `read_file` on the source file mentioned in the traceback before providing the final answer
 - If you get a redirect (307), try the same path with a trailing slash
-- API paths: Use paths like `/items/`, `/analytics/scores`, `/analytics/completion-rate?lab=lab-01`. Do NOT add `/api/` prefix - the base URL already includes the port.
-- If the answer came from a file, include the source on a separate line: "Source: path/to/file.md#section"
+- If the answer came from a file, include the source on a separate line: "Source: path/to/file.md#section" or "Source: path/to/file.py#function-name"
 - For API responses, summarize the key information
 - Be concise - answer in 2-3 sentences maximum unless more detail is needed
-- Maximum 10 tool calls total
+- Maximum 10 tool calls total, but aim for 2-3 calls maximum for efficiency
+- ALWAYS include a source reference when you read a file to find the answer
+- For bug diagnosis: make ONE API call to reproduce the error, then read the source code once, then answer
+
+Specific Question Patterns:
+
+**Learner Count Questions** (e.g., "How many distinct learners have submitted data?"):
+- Use `query_api` with method="GET" and path="/learners/"
+- Count the number of items in the returned list
+- Answer: "There are X distinct learners who have submitted data."
+
+**Bug Detection in Analytics** (e.g., "Which operations could cause runtime errors?"):
+- Make ONE `query_api` call to reproduce the error, then immediately read the source code
+- Use `query_api` with method="GET" and path="/analytics/completion-rate?lab=lab-99" to test with no data
+- Then read `backend/app/routers/analytics.py` using `read_file`
+- Look for these specific patterns:
+  1. Division without zero check: Search for `/ ` or ` /` patterns, especially in completion-rate endpoint where `passed_learners / total_learners` can cause ZeroDivisionError when total_learners is 0
+  2. Sorting with None: Look for `sorted(` calls where the key function accesses attributes that could be None (e.g., `r.avg_score` in top-learners endpoint)
+  3. None-unsafe attribute access: Any `r.some_field` where some_field could be None
+- Answer: "The analytics code has [specific bug] at line [X] in the [endpoint-name] endpoint. This causes [TypeError/ZeroDivisionError] when [condition]."
+- IMPORTANT: Make only ONE API call, then read the source code and provide the answer.
+
+**Top-Learners Bug** (e.g., "The /analytics/top-learners endpoint crashes for some labs..."):
+- Step 1: Make ONE `query_api` call with method="GET" and path="/analytics/top-learners?lab=lab-99"
+- Step 2: Immediately call `read_file` with path="backend/app/routers/analytics.py"
+- Step 3: Find the `sorted(rows, key=lambda r: r.avg_score, reverse=True)` line in the get_top_learners function
+- Step 4: Answer: "The top-learners endpoint has a bug where sorted() fails when r.avg_score is None. Fix by using `r.avg_score or 0` in the sort key."
+- Source: backend/app/routers/analytics.py#get_top_learners
+- CRITICAL: Do NOT make multiple API calls. Make ONE query_api call, then ONE read_file call, then answer.
+
+**Error Handling Comparison** (e.g., "Compare ETL vs API error handling" or "Compare how the ETL pipeline handles failures vs how the API handles errors"):
+- Read `backend/app/etl.py` using `read_file`:
+  - Look for: `raise_for_status()` for HTTP errors, `try/except IntegrityError` for DB conflicts, `session.rollback()` for recovery, `external_id` checks for idempotency (skip if exists)
+- Read `backend/app/routers/*.py` files:
+  - Look for: `HTTPException` raises, `Depends(get_session)` for session management, Pydantic validation errors
+- Answer: "The ETL pipeline uses [try/except, rollback, idempotency checks] to handle failures gracefully. The API routers use [HTTPException, Depends, validation] to return appropriate HTTP error codes."
+
+**API Router Domains** (e.g., "List all API router modules and what domain each handles"):
+- Use `list_files` with path="backend/app/routers" to discover router files
+- Read each router file to understand its domain:
+  - `items.py` - Item/lab catalog management
+  - `learners.py` - Learner/student data management  
+  - `interactions.py` - Learning interaction logs
+  - `analytics.py` - Analytics and statistics
+  - `pipeline.py` - ETL pipeline control
+- Answer with a summary of each router's responsibility.
 
 If you don't find the answer, say so honestly."""
 
@@ -399,13 +446,16 @@ def run_agentic_loop(question: str, settings: AgentSettings) -> dict[str, Any]:
 
 def extract_source(answer: str) -> str:
     """Extract source file reference from the answer."""
-    # Look for patterns like "wiki/file.md" or "Source: wiki/file.md"
     import re
 
-    # Try to find wiki file references
+    # Try to find file references (both .md and .py files)
     patterns = [
-        r"Source:\s*([a-zA-Z0-9_/.-]+(?:#[a-zA-Z0-9_-]+)?)",
+        # Pattern 1: "Source: path/to/file.md#section" or "Source: path/to/file.py#function"
+        r"Source:\s*([a-zA-Z0-9_/.-]+\.(?:md|py)(?:#[a-zA-Z0-9_-]+)?)",
+        # Pattern 2: Standalone .md file reference
         r"([a-zA-Z0-9_/.-]+\.md(?:#[a-zA-Z0-9_-]+)?)",
+        # Pattern 3: Standalone .py file reference with line/function
+        r"([a-zA-Z0-9_/.]+\.py(?:#[a-zA-Z0-9_-]+)?)",
     ]
 
     for pattern in patterns:
