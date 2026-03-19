@@ -250,12 +250,14 @@ Strategy:
 2. If you don't know the exact file name, use `list_files` first to discover available files
 3. Then use `read_file` on the most relevant file(s)
 4. For API questions, make the appropriate API call
-5. Provide a concise final answer with actual information from the files/API - state the facts you found, not what you're going to do
+5. For bug diagnosis: make ONE API call to reproduce the error, then ALWAYS call `read_file` to examine the source code
+6. Provide a concise final answer with actual information from the files/API - state the facts you found, not what you're going to do
 
 Important:
 - ALWAYS provide all required arguments when calling tools
 - After using tools, you MUST provide a final answer with the actual content you found - do NOT just say what file you read
 - If you get an API response with status_code 200, you have the data - provide the answer immediately
+- If you get an API error (4xx or 5xx), you MUST call `read_file` on the source file mentioned in the traceback before providing the final answer
 - If you get a redirect (307), try the same path with a trailing slash
 - If the answer came from a file, include the source on a separate line: "Source: path/to/file.md#section" or "Source: path/to/file.py#function-name"
 - For API responses, summarize the key information
