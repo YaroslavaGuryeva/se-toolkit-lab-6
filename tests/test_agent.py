@@ -151,3 +151,69 @@ def test_agent_uses_query_api_for_status_code_question():
 
     # Check answer is not empty
     assert len(data["answer"].strip()) > 0, "'answer' should not be empty"
+
+
+def test_agent_uses_query_api_for_learner_count_question():
+    """Test that agent uses query_api tool when asked about distinct learner count."""
+    result = subprocess.run(
+        [sys.executable, "agent.py", "How many distinct learners have submitted data? Query the API to find out."],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    # Check exit code
+    assert result.returncode == 0, f"Agent failed: {result.stderr}"
+
+    # Parse stdout as JSON
+    data = json.loads(result.stdout)
+
+    # Check required fields
+    assert "answer" in data, "Missing 'answer' field"
+    assert "tool_calls" in data, "Missing 'tool_calls' field"
+
+    # Check that query_api was used
+    tool_names = [call["tool"] for call in data["tool_calls"]]
+    assert "query_api" in tool_names, "Expected query_api to be called"
+
+    # Check answer mentions a number or learner count
+    answer_lower = data["answer"].lower()
+    has_number = any(char.isdigit() for char in data["answer"])
+    has_learner = "learner" in answer_lower or "student" in answer_lower or "user" in answer_lower
+    assert has_number or has_learner, f"Expected answer to mention learner count, got: {data['answer']}"
+
+    # Check answer is not empty
+    assert len(data["answer"].strip()) > 0, "'answer' should not be empty"
+
+
+def test_agent_uses_read_file_for_analytics_bug_detection():
+    """Test that agent uses read_file tool when asked to find bugs in analytics code."""
+    result = subprocess.run(
+        [sys.executable, "agent.py", "Read the analytics router source code. Which operations could cause runtime errors?"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    # Check exit code
+    assert result.returncode == 0, f"Agent failed: {result.stderr}"
+
+    # Parse stdout as JSON
+    data = json.loads(result.stdout)
+
+    # Check required fields
+    assert "answer" in data, "Missing 'answer' field"
+    assert "tool_calls" in data, "Missing 'tool_calls' field"
+
+    # Check that read_file was used
+    tool_names = [call["tool"] for call in data["tool_calls"]]
+    assert "read_file" in tool_names, "Expected read_file to be called"
+
+    # Check answer mentions bug patterns (division, None, sorted, error types)
+    answer_lower = data["answer"].lower()
+    bug_keywords = ["division", "none", "sorted", "zerodivision", "typeerror", "error", "bug", "risk", "unsafe"]
+    has_keyword = any(kw in answer_lower for kw in bug_keywords)
+    assert has_keyword, f"Expected answer to mention bug patterns, got: {data['answer']}"
+
+    # Check answer is not empty
+    assert len(data["answer"].strip()) > 0, "'answer' should not be empty"
